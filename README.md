@@ -1,4 +1,4 @@
-# ESC
+# ESC: Emulating Self-attention with Convolution for Efficient Image Super-Resolution
 
 
 ### Quantitave Results on the DIV2K dataset
