@@ -7,7 +7,14 @@ from einops import rearrange
 from basicsr.utils.registry import ARCH_REGISTRY
 
 from torch.nn.attention.flex_attention import flex_attention
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Literal
+
+import math
+
+
+SampleMods = Literal[
+    "conv", "pixelshuffledirect", "pixelshuffle", "nearest+conv", "dysample"
+]
 
 
 def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
@@ -435,6 +442,169 @@ class ESCReal(nn.Module):
         return x
 
 
+class UniUpsample(nn.Sequential):
+    """
+    Unified Upsampling module for various upscaling methods and multiple upscaling factors.
+    Codes from: https://github.com/umzi2/MoSRV2/blob/dbad51610ac7fcb569b7d7ed25732f1bb959fa14/mosrv2.py#L100
+    """
+    def __init__(
+        self,
+        upsample: SampleMods,
+        scale: int = 2,
+        in_dim: int = 64,
+        out_dim: int = 3,
+        mid_dim: int = 64,  # Only pixelshuffle and DySample
+        group: int = 4,  # Only DySample
+    ) -> None:
+        m = []
+
+        if scale == 1 or upsample == "conv":
+            m.append(nn.Conv2d(in_dim, out_dim, 3, 1, 1))
+        elif upsample == "pixelshuffledirect":
+            m.extend(
+                [nn.Conv2d(in_dim, out_dim * scale**2, 3, 1, 1), nn.PixelShuffle(scale)]
+            )
+        elif upsample == "pixelshuffle":
+            m.extend([nn.Conv2d(in_dim, mid_dim, 3, 1, 1), nn.LeakyReLU(inplace=True)])
+            if (scale & (scale - 1)) == 0:  # scale = 2^n
+                for _ in range(int(math.log2(scale))):
+                    m.extend(
+                        [nn.Conv2d(mid_dim, 4 * mid_dim, 3, 1, 1), nn.PixelShuffle(2)]
+                    )
+            elif scale == 3:
+                m.extend([nn.Conv2d(mid_dim, 9 * mid_dim, 3, 1, 1), nn.PixelShuffle(3)])
+            else:
+                raise ValueError(
+                    f"scale {scale} is not supported. Supported scales: 2^n and 3."
+                )
+            m.append(nn.Conv2d(mid_dim, out_dim, 3, 1, 1))
+        elif upsample == "nearest+conv":
+            if (scale & (scale - 1)) == 0:
+                for _ in range(int(math.log2(scale))):
+                    m.extend(
+                        (
+                            nn.Conv2d(in_dim, in_dim, 3, 1, 1),
+                            nn.Upsample(scale_factor=2),
+                            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                        )
+                    )
+                m.extend(
+                    (
+                        nn.Conv2d(in_dim, in_dim, 3, 1, 1),
+                        nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                    )
+                )
+            elif scale == 3:
+                m.extend(
+                    (
+                        nn.Conv2d(in_dim, in_dim, 3, 1, 1),
+                        nn.Upsample(scale_factor=scale),
+                        nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                        nn.Conv2d(in_dim, in_dim, 3, 1, 1),
+                        nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                    )
+                )
+            else:
+                raise ValueError(
+                    f"scale {scale} is not supported. Supported scales: 2^n and 3."
+                )
+            m.append(nn.Conv2d(in_dim, out_dim, 3, 1, 1))
+        elif upsample == "dysample":
+            if mid_dim != in_dim:
+                m.extend(
+                    [nn.Conv2d(in_dim, mid_dim, 3, 1, 1), nn.LeakyReLU(inplace=True)]
+                )
+                dys_dim = mid_dim
+            else:
+                dys_dim = in_dim
+            m.append(DySample(dys_dim, out_dim, scale, group))
+        else:
+            raise ValueError(
+                f"An invalid Upsample was selected. Please choose one of {SampleMods}"
+            )
+        super().__init__(*m)
+
+        self.register_buffer(
+            "MetaUpsample",
+            torch.tensor(
+                [
+                    2,  # Block version, if you change something, please number from the end so that you can distinguish between authorized changes and third parties
+                    list(SampleMods.__args__).index(upsample),  # UpSample method index
+                    scale,
+                    in_dim,
+                    out_dim,
+                    mid_dim,
+                    group,
+                ],
+                dtype=torch.uint8,
+            ),
+        )
+
+
+@ARCH_REGISTRY.register()
+class ESCRealM(nn.Module):
+    """
+    ESC-Real for multiple upscaling factor and various options for upsampling module.
+    For more information, please refer to this issue: https://github.com/dslisleedh/ESC/issues/2
+    """
+    def __init__(
+            self, dim: int, pdim: int, kernel_size: int,
+            n_blocks: int, conv_blocks: int, window_size: int, num_heads: int,
+            upscaling_factor: int, exp_ratio: int = 2, deployment=False,
+            upsampler: SampleMods = "nearest+conv",
+    ):
+        super().__init__()
+        self.upscaling_factor = upscaling_factor
+
+        if deployment:
+            attn_func = torch.compile(flex_attention, dynamic=True)
+        else:
+            attn_func = attention
+
+        self.plk_func = _geo_ensemble
+
+        self.plk_filter = nn.Parameter(torch.randn(pdim, pdim, kernel_size, kernel_size))
+        torch.nn.init.orthogonal_(self.plk_filter)
+
+        c_in = 3 * 16 if upsampling_factor == 1 else 3 * 4 if upsampling_factor == 2 else 3
+        self.proj = nn.Conv2d(c_in, dim, 3, 1, 1)
+        self.blocks = nn.ModuleList([
+            Block(
+                dim, pdim, conv_blocks,
+                window_size, num_heads, exp_ratio,
+                attn_func, deployment
+            ) for _ in range(n_blocks)
+        ])
+        self.last = nn.Conv2d(dim, dim, 3, 1, 1)
+
+        self.to_img = UniUpsample(upsampler, upscaling_factor, dim, 3, dim, 4)
+        self.upscaling_factor = upscaling_factor
+        self.skip = nn.Sequential(
+            nn.Conv2d(c_in, dim * 2, 1, 1, 0),
+            nn.Conv2d(dim * 2, dim * 2, 7, 1, 3, groups=dim * 2, padding_mode='reflect'),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(dim * 2, dim, 1, 1, 0),
+        )
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        state_dict["to_img.MetaUpsample"] = self.to_img.MetaUpsample
+        return super().load_state_dict(state_dict, *args, **kwargs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.upscaling_factor == 1:
+            x = F.pixel_unshuffle(x, 4)
+        elif self.upscaling_factor == 2:
+            x = F.pixel_unshuffle(x, 2)
+        feat = self.proj(x)
+        skip = feat
+        plk_filter = self.plk_func(self.plk_filter)
+        for block in self.blocks:
+            feat = block(feat, plk_filter)
+        feat = self.last(feat) + skip + self.skip(x)
+        x = self.to_img(feat)
+        return x
+
+
 if __name__== '__main__':
     from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis    
     import numpy as np
@@ -465,7 +635,24 @@ if __name__== '__main__':
     shape = (batch_size, 3, height // upsampling_factor, width // upsampling_factor)
     model = ESCReal(**model_kwargs)
     print(model)
-    
+
+    # ESC-Real-M
+    # model_kwargs = {
+    #     'dim': 64,
+    #     'pdim': 16,
+    #     'kernel_size': 13,
+    #     'n_blocks': 10,
+    #     'conv_blocks': 5,
+    #     'window_size': 32,
+    #     'num_heads': 4,
+    #     'upscaling_factor': upsampling_factor,
+    #     'exp_ratio': 2,
+    #     'deployment': True,   # Comment this for FLOPs/Params calculation
+    #     'upsampler': 'pixelshuffle',
+    # }
+    # shape = (batch_size, 3, height // upsampling_factor, width // upsampling_factor)
+    # model = ESCRealM(**model_kwargs)
+    # print(model)
 
     test_direct_metrics(model, shape, use_float16=False, n_repeat=100)
 
