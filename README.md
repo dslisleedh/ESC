@@ -10,5 +10,31 @@ by Dongheon Lee, Seokju Yun, and Youngmin Ro
 
 [[Paper]](https://arxiv.org/abs/2503.06671)
 
-### Quantitave Results on the DIV2K dataset
+## Installation
+
+```bash
+git clone https://github.com/dslisleedh/ESC.git
+cd ESC
+conda create -n esc python=3.10
+conda activate esc
+conda install pytorch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 pytorch-cuda=12.1 -c pytorch -c nvidia
+pip install -r requirements.txt 
+python setup.py develop
+```
+
+### NOTE !!!!!!
+Please comment the Line 769 in pytorch/_inductor/kernel/flex_attention.py to avoid unnecessary assertion error.
+```python
+# assert Bq == Bkv, "Batch dimension must match"
+```
+I don't know why but pytorch assings different tensor shape pointer for Q, KV tensors, even though they have the exact same shape.
+Note that flex_attention is added recently in pytorch, so it might be fixed in the future.
+
+## Results
+
+### ClassicSR Quantitave Results on the DIV2K dataset
 ![image](https://github.com/dslisleedh/ESC/blob/main/MainDIV2K.png)
+
+### ClassicSR Quantitave Results on the DFLIP dataset
+DFLIP datasets consist of 4 datasets: DIV2K, Flickr2K, LSDIR, and DiverSeg-IP.
+We leverage the DFLIP datasets to demonstrate our method's data scalability.
