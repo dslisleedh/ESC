@@ -550,8 +550,8 @@ class ESCRealM(nn.Module):
     def __init__(
             self, dim: int, pdim: int, kernel_size: int,
             n_blocks: int, conv_blocks: int, window_size: int, num_heads: int,
-            upscaling_factor: int, exp_ratio: int = 2, deployment=False,
-            upsampler: SampleMods = "nearest+conv",
+            upscaling_factor: int, exp_ratio: int = 2, deployment=False, mid_dim:int = 48,
+            upsampler: SampleMods = "nearest+conv", unshuffle_mod:bool = True
     ):
         super().__init__()
         self.upscaling_factor = upscaling_factor
@@ -564,10 +564,32 @@ class ESCRealM(nn.Module):
         self.plk_func = _geo_ensemble
 
         self.plk_filter = nn.Parameter(torch.randn(pdim, pdim, kernel_size, kernel_size))
-        torch.nn.init.orthogonal_(self.plk_filter)
+        torch.nn.init.orthogonal(self.plk_filter)
 
-        c_in = 3 * 16 if upsampling_factor == 1 else 3 * 4 if upsampling_factor == 2 else 3
-        self.proj = nn.Conv2d(c_in, dim, 3, 1, 1)
+        if unshuffle_mod and upscaling_factor<3:
+            unshuffle_factor = 4//upscaling_factor
+            upscaling_factor = 4
+            self.proj = nn.Sequential(
+                nn.PixelUnshuffle(unshuffle_factor),
+                nn.Conv2d(3*unshuffle_factor**2, dim, 3, 1, 1)
+            )
+            self.skip = nn.Sequential(
+                nn.PixelUnshuffle(unshuffle_factor),
+                nn.Conv2d(3*unshuffle_factor**2, dim * 2, 1, 1, 0),
+                nn.Conv2d(dim * 2, dim * 2, 7, 1, 3, groups=dim * 2, padding_mode='reflect'),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(dim * 2, dim, 1, 1, 0),
+            )
+            self.padding = unshuffle_factor
+        else:
+            self.proj = nn.Conv2d(3, dim, 3, 1, 1)
+            self.skip = nn.Sequential(
+                nn.Conv2d(3, dim * 2, 1, 1, 0),
+                nn.Conv2d(dim * 2, dim * 2, 7, 1, 3, groups=dim * 2, padding_mode='reflect'),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(dim * 2, dim, 1, 1, 0),
+            )
+            self.padding = 0
         self.blocks = nn.ModuleList([
             Block(
                 dim, pdim, conv_blocks,
@@ -577,24 +599,21 @@ class ESCRealM(nn.Module):
         ])
         self.last = nn.Conv2d(dim, dim, 3, 1, 1)
 
-        self.to_img = UniUpsample(upsampler, upscaling_factor, dim, 3, dim, 4)
-        self.upscaling_factor = upscaling_factor
-        self.skip = nn.Sequential(
-            nn.Conv2d(c_in, dim * 2, 1, 1, 0),
-            nn.Conv2d(dim * 2, dim * 2, 7, 1, 3, groups=dim * 2, padding_mode='reflect'),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(dim * 2, dim, 1, 1, 0),
-        )
+        self.to_img = UniUpsample(upsampler, upscaling_factor, dim, 3, mid_dim, 4)
 
     def load_state_dict(self, state_dict, *args, **kwargs):
         state_dict["to_img.MetaUpsample"] = self.to_img.MetaUpsample
         return super().load_state_dict(state_dict, *args, **kwargs)
-
+    
+    def check_img_size(self, x:torch.Tensor, h: int, w: int)->torch.Tensor:
+        mod_pad_h = (self.padding - h % self.padding) % self.padding
+        mod_pad_w = (self.padding - w % self.padding) % self.padding
+        return F.pad(x, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.upscaling_factor == 1:
-            x = F.pixel_unshuffle(x, 4)
-        elif self.upscaling_factor == 2:
-            x = F.pixel_unshuffle(x, 2)
+        b, c, h, w = x.shape
+        if self.padding:
+            x = self.check_img_size(x,h,w)
         feat = self.proj(x)
         skip = feat
         plk_filter = self.plk_func(self.plk_filter)
@@ -602,7 +621,7 @@ class ESCRealM(nn.Module):
             feat = block(feat, plk_filter)
         feat = self.last(feat) + skip + self.skip(x)
         x = self.to_img(feat)
-        return x
+        return x[:, :, : h * self.upscaling_factor, : w * self.upscaling_factor]
 
 
 if __name__== '__main__':
