@@ -95,7 +95,7 @@ if __name__ == '__main__':
         keywords='computer vision, pytorch, basicsr, image restoration, super-resolution',
         url='https://github.com/dslisleedh/ESC',
         include_package_data=True,
-        packages=find_packages(exclude=('options', 'datasets', 'experiments', 'results', 'tb_logger', 'wandb')),
+        packages=find_packages(exclude=('options', 'datasets', 'experiments', 'results', 'tb_logger', 'wandb', 'esc_arb')),
         classifiers=[
             'Development Status :: 4 - Beta',
             'License :: OSI Approved :: MIT Software License',
