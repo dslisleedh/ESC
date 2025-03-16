@@ -302,6 +302,41 @@ class ESC(nn.Module):
     def convert(self):
         self.plk_filter = nn.Parameter(self.plk_func(self.plk_filter))
         self.plk_func = nn.Identity()
+
+    @torch.no_grad()
+    def load_state_dict(self, state_dict, strict = True, assign = False):
+        to_img_k = state_dict.get('to_img.weight')
+        to_img_b = state_dict.get('to_img.bias')
+        sd_scale = int((to_img_k.shape[0] // 3)**0.5)
+        if sd_scale != self.upscaling_factor:
+            from basicsr.utils import get_root_logger
+            from copy import deepcopy
+
+            state_dict = deepcopy(state_dict)
+            logger = get_root_logger()
+            logger.info(
+                f'Converting the SubPixelConvolution from {sd_scale}x to {self.upscaling_factor}x'
+            )
+
+            def interpolate_kernel(kernel, scale_in, scale_out):
+                _, _, kh, kw = kernel.shape
+                kernel = rearrange(kernel, '(rgb rh rw) cin kh kw -> (cin kh kw) rgb rh rw', rgb=3, rh=scale_in, rw=scale_in)
+                kernel = F.interpolate(kernel, size=(scale_out, scale_out), mode='bilinear', align_corners=False)
+                kernel = rearrange(kernel, '(cin kh kw) rgb rh rw -> (rgb rh rw) cin kh kw', kh=kh, kw=kw)
+                return kernel
+
+            def interpolate_bias(bias, scale_in, scale_out):
+                bias = rearrange(bias, '(rgb rh rw) -> 1 rgb rh rw', rgb=3, rh=scale_in, rw=scale_in)
+                bias = F.interpolate(bias, size=(scale_out, scale_out), mode='bilinear', align_corners=False)
+                bias = rearrange(bias, '1 rgb rh rw -> (rgb rh rw)')
+                return bias
+            
+            to_img_k = interpolate_kernel(to_img_k, sd_scale, self.upscaling_factor)
+            to_img_b = interpolate_bias(to_img_b, sd_scale, self.upscaling_factor)
+            state_dict['to_img.weight'] = to_img_k
+            state_dict['to_img.bias'] = to_img_b
+
+        return super().load_state_dict(state_dict, strict, assign)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         feat = self.proj(x)
