@@ -16,17 +16,17 @@ ATTN_TYPE = Literal['Naive', 'SDPA', 'Flex']
 Naive Self-Attention: 
     - Numerically stable
     - Choose this for train if you have enough time and GPUs
-    - Training ESC with Naive Self-Attention: 33.46dB @ Urban100x2
+    - Training ESC with Naive Self-Attention: 33.46dB @Urban100x2
 
 Flex Attention:
     - Fast and memory efficient
     - Choose this for train/test if you are using Linux OS
-    - Training ESC with Flex Attention: 33.45dB @ Urban100x2
+    - Training ESC with Flex Attention: 33.44dB @Urban100x2
 
 SDPA with memory efficient kernel:
     - Memory efficient (not fast)
     - Choose this for train/test if you are using Windows OS
-    - Training ESC with SDPA: 33.43dB @ Urban100x2
+    - Training ESC with SDPA: 33.43dB @Urban100x2
 """
 
 
