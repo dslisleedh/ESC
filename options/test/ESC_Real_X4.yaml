@@ -63,7 +63,7 @@ network_g:
   num_heads: 4
   upscaling_factor: 4
   exp_ratio: 2
-  deployment: True
+  attn_type: Flex   # Naive, SDPA, Flex
 
 # path
 path:
@@ -76,12 +76,3 @@ val:
   save_img: true
   suffix: ~  # add suffix to saved images, if None, use exp name
 
-  metrics:
-    psnr: # metric name, can be arbitrary
-      type: calculate_psnr
-      crop_border: 4
-      test_y_channel: true
-    ssim:
-      type: calculate_ssim
-      crop_border: 4
-      test_y_channel: true
