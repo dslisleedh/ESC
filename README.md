@@ -10,6 +10,11 @@ by Dongheon Lee, Seokju Yun, and Youngmin Ro
 
 [[Paper]](https://arxiv.org/abs/2503.06671) [[Pre-trained Models]](https://github.com/dslisleedh/ESC/releases/tag/1.0.0)
 
+## Real-world SR Visual Results
+[<img src="figs/imgsli1.png" height="250"/>](https://imgsli.com/MzY1MTE3) [<img src="figs/imgsli2.png" height="250"/>](https://imgsli.com/MzY1MTI1) [<img src="figs/imgsli3.png" height="250"/>](https://imgsli.com/MzY1MTI4)  
+
+[<img src="figs/imgsli4.png" height="250"/>](https://imgsli.com/MzY1MTMx) [<img src="figs/imgsli5.png" height="250"/>](https://imgsli.com/MzY1MTM3) [<img src="figs/imgsli6.png" height="250"/>](https://imgsli.com/MzY1MTQy)
+
 ## Installation
 
 ```bash
@@ -50,13 +55,19 @@ python esc/train.py -opt $CONFIG_PATH
 
 ## Results
 
-### ClassicSR Quantitave Results on the DIV2K dataset
+### ClassicSR Quantitative Results on the DIV2K dataset
 ![image](https://github.com/dslisleedh/ESC/blob/main/figs/MainDIV2K.png)
 
-### ClassicSR Quantitave Results on the DFLIP dataset
+### ClassicSR Quantitative Results on the DFLIP dataset
 DFLIP datasets consist of 4 datasets: DIV2K, Flickr2K, LSDIR, and DiverSeg-IP.
 We leverage the DFLIP datasets to demonstrate our method's data scalability.
 ![image](https://github.com/dslisleedh/ESC/blob/main/figs/DFLIPQuantitative.png)
+
+### Arbitrary-scale SR Quantitative Results
+![image](https://github.com/dslisleedh/ESC/blob/main/figs/ArbQuantitative.png?raw=true)
+
+### Real-world SR Quantitative Results
+![image](https://github.com/dslisleedh/ESC/blob/main/figs/RealWorldQuantitative.png?raw=true)
 
 ## Acknowledgement
 This work is based on [BasicSR](https://github.com/XPixelGroup/BasicSR) and [HAT](https://github.com/XPixelGroup/HAT). We thank them for their great work and for sharing the code.
