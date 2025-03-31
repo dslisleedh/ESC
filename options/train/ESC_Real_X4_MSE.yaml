@@ -88,7 +88,7 @@ network_g:
   num_heads: 4
   upscaling_factor: 4
   exp_ratio: 2
-  deployment: True
+  attn_type: Flex
 
 # path
 path:
