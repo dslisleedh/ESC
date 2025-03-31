@@ -22,6 +22,32 @@ pip install -r requirements.txt
 python setup.py develop
 ```
 
+## Training
+
+### Single GPU
+```bash
+python esc/train.py -opt $CONFIG_PATH
+```
+
+### Multi GPU (local)
+```bash
+PYTHONPATH="./:${PYTHONPATH}" CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch\
+  --nproc_per_node=4 --master_port=5612 \
+ esc/train.py -opt $CONFIG_PATH --launcher pytorch
+```
+
+### Multi GPU (SLURM)
+```bash
+PYTHONPATH="./:${PYTHONPATH}" GLOG_vmodule=MemcachedClient=-1 srun -p $PARTITION --mpi=pmi2 \
+    --gres=$GPUS --ntasks=4 --cpus-per-task $CPUs --kill-on-bad-exit=1 \
+    python -u esc/train.py -opt $CONFIG_PATHl --launcher="slurm" 
+```
+
+## Testing
+```bash
+python esc/train.py -opt $CONFIG_PATH
+```
+
 ## Results
 
 ### ClassicSR Quantitave Results on the DIV2K dataset
@@ -31,4 +57,7 @@ python setup.py develop
 DFLIP datasets consist of 4 datasets: DIV2K, Flickr2K, LSDIR, and DiverSeg-IP.
 We leverage the DFLIP datasets to demonstrate our method's data scalability.
 ![image](https://github.com/dslisleedh/ESC/blob/main/figs/DFLIPQuantitative.png)
+
+## Acknowledgement
+This work is based on [BasicSR](https://github.com/XPixelGroup/BasicSR) and [HAT](https://github.com/XPixelGroup/HAT). We thank them for their great work and for sharing the code.
 
