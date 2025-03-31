@@ -12,4 +12,5 @@ timm
 scipy
 lmdb
 pynvml
+pyiqa
 # Do Not Install BasicSR using pip
