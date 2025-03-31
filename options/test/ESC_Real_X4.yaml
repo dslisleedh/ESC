@@ -6,50 +6,32 @@ manual_seed: 0
 
 datasets:
   test_1:  # the 1st test dataset
-    name: Set5
-    type: PairedImageDataset
-    dataroot_gt: /home/leedh97/datasets/Set5/HR
-    dataroot_lq: /home/leedh97/datasets/Set5/LR_bicubic/X4
-    filename_tmpl: '{}x4'
+    name: DRealSR
+    type: SingleImageDataset
+    dataroot_lq: /home2/leedh97/datasets/DRealSR/Test_x4/test_LR
     io_backend:
       type: disk
 
-  test_2:  # the 2nd test dataset
-    name: Set14
-    type: PairedImageDataset
-    dataroot_gt: /home/leedh97/datasets/Set14/HR
-    dataroot_lq: /home/leedh97/datasets/Set14/LR_bicubic/X4
-    filename_tmpl: '{}x4'
+  test_2:  # the 1st test dataset
+    name: RealSR
+    type: SingleImageDataset
+    dataroot_lq: /home2/leedh97/datasets/RealSRV3/LR
     io_backend:
       type: disk
 
   test_3:  # the 1st test dataset
-    name: B100
-    type: PairedImageDataset
-    dataroot_gt: /home/leedh97/datasets/B100/HR
-    dataroot_lq: /home/leedh97/datasets/B100/LR_bicubic/X4
-    filename_tmpl: '{}x4'
+    name: RealSRSet+5images
+    type: SingleImageDataset
+    dataroot_lq: /home2/leedh97/TFP/RealSRSet+5images
     io_backend:
       type: disk
 
-  test_4:  # the 2nd test dataset
-    name: Urban100
-    type: PairedImageDataset
-    dataroot_gt: /home/leedh97/datasets/Urban100/HR
-    dataroot_lq: /home/leedh97/datasets/Urban100/LR_bicubic/X4
-    filename_tmpl: '{}x4'
+  test_4:  # the 1st test dataset
+    name: RealLQ250
+    type: SingleImageDataset
+    dataroot_lq: /home2/leedh97/TFP/RealLQ250
     io_backend:
       type: disk
-
-  test_5:  # the 1st test dataset
-    name: Manga109
-    type: PairedImageDataset
-    dataroot_gt: /home/leedh97/datasets/Manga109/HR
-    dataroot_lq: /home/leedh97/datasets/Manga109/LR_bicubic/X4
-    filename_tmpl: '{}x4'
-    io_backend:
-      type: disk
-
 
 # network structures
 network_g:
@@ -67,7 +49,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: I'll Update this later
+  pretrain_network_g: /home/leedh97/ESC/pretrained_modelsESC_Real_X4_GAN.pth
   param_key_g: 'params_ema'
   strict_load_g: true
 
@@ -75,4 +57,3 @@ path:
 val:
   save_img: true
   suffix: ~  # add suffix to saved images, if None, use exp name
-
