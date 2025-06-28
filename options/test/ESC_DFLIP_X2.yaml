@@ -62,7 +62,6 @@ network_g:
   num_heads: 4
   upscaling_factor: 2
   exp_ratio: 1.25
-  deployment: True
   attn_type: Flex   # Naive, SDPA, Flex
 
 # path
