@@ -3,7 +3,7 @@
 ## Installation
 
 ```
-conda create -n lte python=3.10
+conda create -n esclte python=3.10
 conda activate esclte
 pip3 install torch torchvision torchaudio
 pip install tqdm imageio tensorboardX einops timm
