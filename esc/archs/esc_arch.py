@@ -87,9 +87,10 @@ class LayerNorm(nn.Module):
 
 
 class ConvolutionalAttention(nn.Module):
-    def __init__(self, pdim: int):
+    def __init__(self, pdim: int, kernel_size: int = 13):
         super().__init__()
         self.pdim = pdim
+        self.lk_size = kernel_size
         self.sk_size = 3
         self.dwc_proj = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
@@ -112,13 +113,13 @@ class ConvolutionalAttention(nn.Module):
             x1_ = rearrange(x1_, '1 (b c) h w -> b c h w', b=bs, c=self.pdim)
             
             # Static LK Conv + Dynamic Conv
-            x1 = F.conv2d(x1, lk_filter, stride=1, padding=lk_filter.shape[-1] // 2) + x1_
+            x1 = F.conv2d(x1, lk_filter, stride=1, padding=self.lk_size // 2) + x1_
             
             x = torch.cat([x1, x2], dim=1)
         else:
             # for GPU
-            dynamic_kernel = self.dwc_proj(x[:, :self.pdim]).reshape(-1, 1, self.sk_size, self.sk_size)
-            x[:, :self.pdim] = F.conv2d(x[:, :self.pdim], lk_filter, stride=1, padding=13 // 2) \
+            dynamic_kernel = self.dwc_proj(x[:, :self.pdim]).reshape(self.pdim, 1, self.sk_size, self.sk_size) 
+            x[:, :self.pdim] = F.conv2d(x[:, :self.pdim], lk_filter, stride=1, padding=self.lk_size // 2) \
                 + F.conv2d(x[:, :self.pdim], dynamic_kernel, stride=1, padding=self.sk_size // 2, groups=self.pdim)
             
             # For Mobile Conversion, uncomment the following code
@@ -133,9 +134,9 @@ class ConvolutionalAttention(nn.Module):
     
 
 class ConvAttnWrapper(nn.Module):
-    def __init__(self, dim: int, pdim: int):
+    def __init__(self, dim: int, pdim: int, kernel_size: int = 13):
         super().__init__()
-        self.plk = ConvolutionalAttention(pdim)
+        self.plk = ConvolutionalAttention(pdim, kernel_size)
         self.aggr = nn.Conv2d(dim, dim, 1, 1, 0)
 
     def forward(self, x: torch.Tensor, lk_filter: torch.Tensor) -> torch.Tensor:
@@ -255,8 +256,8 @@ class WindowAttention(nn.Module):
 class Block(nn.Module):
     def __init__(
             self, dim: int, pdim: int, conv_blocks: int, 
-            window_size: int, num_heads: int, exp_ratio: int, 
-            attn_func=None, attn_type: ATTN_TYPE = 'Flex'
+            kernel_size: int, window_size: int, num_heads: int, exp_ratio: int, 
+            attn_func=None, attn_type: ATTN_TYPE = 'Flex', use_ln: bool = False
         ):
         super().__init__()
         self.ln_proj = LayerNorm(dim)
@@ -265,7 +266,8 @@ class Block(nn.Module):
         self.ln_attn = LayerNorm(dim) 
         self.attn = WindowAttention(dim, window_size, num_heads, attn_func, attn_type)
         
-        self.pconvs = nn.ModuleList([ConvAttnWrapper(dim, pdim) for _ in range(conv_blocks)])
+        self.lns = nn.ModuleList([LayerNorm(dim) if use_ln else nn.Identity() for _ in range(conv_blocks)])
+        self.pconvs = nn.ModuleList([ConvAttnWrapper(dim, pdim, kernel_size) for _ in range(conv_blocks)])
         self.convffns = nn.ModuleList([ConvFFN(dim, 3, exp_ratio) for _ in range(conv_blocks)])
         
         self.ln_out = LayerNorm(dim)
@@ -276,8 +278,8 @@ class Block(nn.Module):
         x = self.ln_proj(x)
         x = self.proj(x)
         x = x + self.attn(self.ln_attn(x))
-        for pconv, convffn in zip(self.pconvs, self.convffns):
-            x = x + pconv(convffn(x), plk_filter)
+        for ln, pconv, convffn in zip(self.lns, self.pconvs, self.convffns):
+            x = x + pconv(convffn(ln(x)), plk_filter)
         x = self.conv_out(self.ln_out(x))
         return x + skip
 
@@ -302,6 +304,7 @@ class ESC(nn.Module):
         self, dim: int, pdim: int, kernel_size: int,
         n_blocks: int, conv_blocks: int, window_size: int, num_heads: int,
         upscaling_factor: int, exp_ratio: int = 2, attn_type: ATTN_TYPE = 'Flex',
+        use_ln: bool = False
     ):
         super().__init__()
         if attn_type == 'Naive':
@@ -323,8 +326,8 @@ class ESC(nn.Module):
         self.blocks = nn.ModuleList([
             Block(
                 dim, pdim, conv_blocks, 
-                window_size, num_heads, exp_ratio,
-                attn_func, attn_type
+                kernel_size, window_size, num_heads, exp_ratio,
+                attn_func, attn_type, use_ln=use_ln
             ) for _ in range(n_blocks)
         ])
         self.last = nn.Conv2d(dim, dim, 3, 1, 1)
@@ -394,7 +397,7 @@ if __name__== '__main__':
 
     height = 720 if test_size == 'HD' else 1080 if test_size == 'FHD' else 2160
     width = 1280 if test_size == 'HD' else 1920 if test_size == 'FHD' else 3840
-    upsampling_factor = 4
+    upsampling_factor = 2
     batch_size = 1
     
     # Base
@@ -408,7 +411,7 @@ if __name__== '__main__':
         'num_heads': 4,
         'upscaling_factor': upsampling_factor,
         'exp_ratio': 1.25,
-        'deployment': True,   # Comment this for FLOPs/Params calculation
+        'attn_type': 'Flex',  # Naive, SDPA, Flex / For FLOPs calculation, use Naive
     }
     # Light
     # model_kwargs = {
@@ -421,11 +424,11 @@ if __name__== '__main__':
     #     'num_heads': 4,
     #     'upscaling_factor': upsampling_factor,
     #     'exp_ratio': 1.25,
-    #     'deployment': True,   # Comment this for FLOPs/Params calculation
+    #     'attn_type': 'Flex',  # Naive, SDPA, Flex / For FLOPs calculation, use Naive
     # }
     shape = (batch_size, 3, height // upsampling_factor, width // upsampling_factor)
     model = ESC(**model_kwargs)
-    # print(model)
+    print(model)
     
 
     test_direct_metrics(model, shape, use_float16=False, n_repeat=100)
