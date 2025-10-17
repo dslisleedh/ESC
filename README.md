@@ -8,7 +8,7 @@ This repository is an official implementation of the paper "Emulating Self-atten
 
 by Dongheon Lee, Seokju Yun, and Youngmin Ro
 
-[[Paper]](https://arxiv.org/abs/2503.06671) [[Pre-trained Models]](https://github.com/dslisleedh/ESC/releases/tag/1.0.0)
+[[Paper]](https://openaccess.thecvf.com/content/ICCV2025/papers/Lee_Emulating_Self-attention_with_Convolution_for_Efficient_Image_Super-Resolution_ICCV_2025_paper.pdf) [[Pre-trained Models]](https://github.com/dslisleedh/ESC/releases/tag/1.0.0)
 
 ## Real-world SR Visual Results
 [<img src="figs/imgsli1.png" height="250"/>](https://imgsli.com/MzY1MTE3) [<img src="figs/imgsli2.png" height="250"/>](https://imgsli.com/MzY1MTI1) [<img src="figs/imgsli3.png" height="250"/>](https://imgsli.com/MzY1MTI4)  
