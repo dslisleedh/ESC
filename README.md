@@ -11,7 +11,7 @@ by Dongheon Lee, Seokju Yun, and Youngmin Ro
 [[Paper]](https://openaccess.thecvf.com/content/ICCV2025/papers/Lee_Emulating_Self-attention_with_Convolution_for_Efficient_Image_Super-Resolution_ICCV_2025_paper.pdf) [[Supp]](https://openaccess.thecvf.com/content/ICCV2025/supplemental/Lee_Emulating_Self-attention_with_ICCV_2025_supplemental.pdf) [[Pre-trained Models]](https://github.com/dslisleedh/ESC/releases/tag/1.0.0)
 
 ## Update
- - [2025-12-31] Now ESC supports FlashAttention with `torch.scaled_dot_product_attention` using FlashBias [[NeurIPS 2025]](https://arxiv.org/abs/2505.12044). We provide FlashBias implementation for esc and esc_real architectures and release pre-trained weights. **Do not use FlashBias version for academic evaluation.**
+ - [2025-12-31] Now ESC supports FlashAttention with `F.scaled_dot_product_attention` using FlashBias [[NeurIPS 2025]](https://arxiv.org/abs/2505.12044). We provide FlashBias implementation for esc and esc_real architectures and release pre-trained weights. **Do not use FlashBias version for academic evaluation.**
 
 ### ClassicSRx2 trained on DIV2K
 
