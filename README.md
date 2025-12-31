@@ -20,7 +20,7 @@ by Dongheon Lee, Seokju Yun, and Youngmin Ro
 | **ESC (Flex Attention)** | 38.35 / 0.9619 | 34.11 / 0.9223 | 32.41 / 0.9027 | 33.46 / 0.9395 | 39.54 / 0.9790 |
 | **ESC (FlashBias)** | 38.35 / 0.9619 | 34.06 / 0.9221 | 32.41 / 0.9027 | 33.43 / 0.9392 | 39.53 / 0.9790 |
 
-### RealSRx4 trained on DF2KOST @RTX4090
+### RealSRx4 trained on DF2KOST (LQ250; Reconstructing HD image @RTX4090)
 
 | Method | NIQE (↓) | MANIQA (↑) | MUSIQ (↑) | CLIPIQA (↑) | Latency | Memory Usage |
 |---|---:|---:|---:|---:|---:|---:|
@@ -38,8 +38,8 @@ by Dongheon Lee, Seokju Yun, and Youngmin Ro
 ```bash
 git clone https://github.com/dslisleedh/ESC.git
 cd ESC
-conda create -n esc2 python=3.10
-conda activate esc2
+conda create -n esc python=3.10
+conda activate esc
 pip3 install torch torchvision torchaudio  # pytorch 2.6.0 and cuda 12.4
 pip install -r requirements.txt 
 python setup.py develop
