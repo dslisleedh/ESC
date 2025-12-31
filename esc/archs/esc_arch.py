@@ -11,7 +11,7 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 from typing import Optional, Sequence, Literal
 
 
-ATTN_TYPE = Literal['Naive', 'SDPA', 'Flex']
+ATTN_TYPE = Literal['Naive', 'SDPA', 'Flex', 'FlashBias']
 """
 Naive Self-Attention: 
     - Numerically stable
@@ -27,6 +27,11 @@ SDPA with memory efficient kernel:
     - Memory efficient (not fast)
     - Choose this for train/test if you are using Windows OS
     - Training ESC with SDPA: 33.43dB @Urban100x2
+
+FlashBias (Flash Attention with low-rank decomposed relative position bias):
+    - Fast and memory efficient
+    - Choose this for test if you can't use Flex Attention
+    - Training from-scatch with FlashBias is not recommended !!! Use pre-trained weights from Flex Attention
 """
 
 
@@ -161,8 +166,8 @@ class ConvFFN(nn.Module):
 
 class WindowAttention(nn.Module):
     def __init__(
-            self, dim: int, window_size: int, num_heads: int, 
-            attn_func=None, attn_type: ATTN_TYPE = 'Flex'
+            self, dim: int, window_size: int, num_heads: int,
+            attn_func=None, attn_type: str = 'Flex', flashbias_rank: Optional[int] = None
         ):
         super().__init__()
         self.dim = dim
@@ -171,22 +176,36 @@ class WindowAttention(nn.Module):
         self.num_heads = num_heads
         self.to_qkv = nn.Conv2d(dim, dim*3, 1, 1, 0)
         self.to_out = nn.Conv2d(dim, dim, 1, 1, 0)
-        
+
         self.attn_type = attn_type
         self.attn_func = attn_func
-        self.relative_position_bias = nn.Parameter(
-            torch.randn(num_heads, (2*window_size[0]-1)*(2*window_size[1]-1)).to(torch.float32) * 0.001
-        )
+        
+        if attn_type != 'FlashBias':
+            self.relative_position_bias = nn.Parameter(
+                torch.randn(num_heads, (2*window_size[0]-1)*(2*window_size[1]-1)).to(torch.float32) * 0.001
+            )
+
         if self.attn_type == 'Flex':
             self.get_rpe = apply_rpe(self.relative_position_bias, window_size[0])
         else:
             self.rpe_idxs = self.create_table_idxs(window_size[0], num_heads)
-        self.is_mobile = False 
+
+        self.flashbias_rank: int = 256 - (dim // num_heads) if flashbias_rank is None else flashbias_rank
+        if self.attn_type == 'FlashBias':
+            self.flashbias_q = nn.Parameter(
+                torch.zeros(num_heads, window_size[0]*window_size[1], self.flashbias_rank)
+            )
+            self.flashbias_k = nn.Parameter(
+                torch.zeros(num_heads, window_size[0]*window_size[1], self.flashbias_rank)
+            )
+        else:
+            self.flashbias_q = None
+            self.flashbias_k = None
+
+        self.is_mobile = False
 
     @staticmethod
     def create_table_idxs(window_size: int, heads: int):
-        # Transposed idxs of original Swin Transformer
-        # But much easier to implement and the same relative position distance anyway
         idxs_window = []
         for head in range(heads):
             for h in range(window_size**2):
@@ -201,13 +220,13 @@ class WindowAttention(nn.Module):
                     idxs_window.append((head, rel_idx))
         idxs = torch.tensor(idxs_window, dtype=torch.long, requires_grad=False)
         return idxs
-        
+
     def pad_to_win(self, x: torch.Tensor, h: int, w: int) -> torch.Tensor:
         pad_h = (self.window_size[0] - h % self.window_size[0]) % self.window_size[0]
         pad_w = (self.window_size[1] - w % self.window_size[1]) % self.window_size[1]
         x = F.pad(x, (0, pad_w, 0, pad_h), mode='reflect')
         return x
-    
+
     def to_mobile(self):
         bias = self.relative_position_bias[self.rpe_idxs[:, 0], self.rpe_idxs[:, 1]]
         self.rpe_bias = nn.Parameter(bias.reshape(1, self.num_heads, self.window_size[0]*self.window_size[1], self.window_size[0]*self.window_size[1]))
@@ -216,7 +235,7 @@ class WindowAttention(nn.Module):
         del self.rpe_idxs
         
         self.is_mobile = True
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -225,46 +244,90 @@ class WindowAttention(nn.Module):
         _, _, h, w = x.shape
         x = self.pad_to_win(x, h, w)
         h_div, w_div = x.shape[2] // self.window_size[0], x.shape[3] // self.window_size[1]
-        
+
         qkv = self.to_qkv(x)
         dtype = qkv.dtype
         qkv = feat_to_win(qkv, self.window_size, self.num_heads)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        
+        q, k, v = qkv[0], qkv[1], qkv[2]  # (B*nwin, heads, N, head_dim)
+
         if self.attn_type == 'Flex':
             out = self.attn_func(q, k, v, score_mod=self.get_rpe)
+
         elif self.attn_type == 'SDPA':
             bias = self.relative_position_bias[self.rpe_idxs[:, 0], self.rpe_idxs[:, 1]]
-            bias = bias.reshape(1, self.num_heads, self.window_size[0]*self.window_size[1], self.window_size[0]*self.window_size[1])
-            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-                out = self.attn_func(q, k, v, attn_mask=bias, is_causal=False)
+            bias = bias.reshape(
+                1, self.num_heads,
+                self.window_size[0]*self.window_size[1],
+                self.window_size[0]*self.window_size[1]
+            )
+            out = self.attn_func(q, k, v, attn_mask=bias, is_causal=False)
+
         elif self.attn_type == 'Naive':
             bias = self.relative_position_bias[self.rpe_idxs[:, 0], self.rpe_idxs[:, 1]]
-            bias = bias.reshape(1, self.num_heads, self.window_size[0]*self.window_size[1], self.window_size[0]*self.window_size[1])
+            bias = bias.reshape(
+                1, self.num_heads,
+                self.window_size[0]*self.window_size[1],
+                self.window_size[0]*self.window_size[1]
+            )
             out = self.attn_func(q, k, v, bias)
+
+        elif self.attn_type == 'FlashBias':
+            Bwin = q.shape[0]
+            heads = q.shape[1]
+            N = q.shape[2]
+            head_dim = q.shape[-1]
+
+            q_bias = self.flashbias_q.to(dtype=q.dtype, device=q.device).unsqueeze(0).expand(Bwin, -1, -1, -1)
+            k_bias = self.flashbias_k.to(dtype=k.dtype, device=k.device).unsqueeze(0).expand(Bwin, -1, -1, -1)
+
+            softmax_scale = head_dim ** -0.5
+            q_cat = torch.cat([q * softmax_scale, q_bias], dim=-1)
+            k_cat = torch.cat([k, k_bias], dim=-1)
+            v_cat = torch.cat([v, torch.zeros((Bwin, heads, N, k_bias.shape[-1]), device=v.device, dtype=v.dtype)], dim=-1)
+
+            # Is this necessary? Just in case?
+            d_total = q_cat.shape[-1]
+            pad = (8 - (d_total % 8)) % 8
+            if pad:
+                z = torch.zeros((Bwin, heads, N, pad), device=q_cat.device, dtype=q_cat.dtype)
+                q_cat = torch.cat([q_cat, z], dim=-1)
+                k_cat = torch.cat([k_cat, z], dim=-1)
+                v_cat = torch.cat([v_cat, z], dim=-1)
+                
+            with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                out = self.attn_func(
+                    # BF16 for Flash Attention Kernel; not F16 for not to use grad scaler
+                    q_cat.to(torch.bfloat16).contiguous(), k_cat.to(torch.bfloat16).contiguous(), v_cat.to(torch.bfloat16).contiguous(),
+                    attn_mask=None,
+                    dropout_p=0.0,
+                    is_causal=False,
+                    scale=1.0,  # Since q_cat is already scaled
+                )[:, :, :, :head_dim]
+
         else:
             raise NotImplementedError(f'Attention type {self.attn_type} is not supported.')
-        
+
         out = win_to_feat(out, self.window_size, h_div, w_div)
         out = self.to_out(out.to(dtype)[:, :, :h, :w])
-        return out   
+        return out
 
     def extra_repr(self):
-        return f'dim={self.dim}, window_size={self.window_size}, num_heads={self.num_heads}'
+        return f'dim={self.dim}, window_size={self.window_size}, num_heads={self.num_heads}, attn_type={self.attn_type}'
 
 
 class Block(nn.Module):
     def __init__(
             self, dim: int, pdim: int, conv_blocks: int, 
             kernel_size: int, window_size: int, num_heads: int, exp_ratio: int, 
-            attn_func=None, attn_type: ATTN_TYPE = 'Flex', use_ln: bool = False
+            attn_func=None, attn_type: ATTN_TYPE = 'Flex', use_ln: bool = False,
+            flashbias_rank: Optional[int] = None
         ):
         super().__init__()
         self.ln_proj = LayerNorm(dim)
         self.proj = ConvFFN(dim, 3, 2)
 
         self.ln_attn = LayerNorm(dim) 
-        self.attn = WindowAttention(dim, window_size, num_heads, attn_func, attn_type)
+        self.attn = WindowAttention(dim, window_size, num_heads, attn_func, attn_type, flashbias_rank=flashbias_rank)
         
         self.lns = nn.ModuleList([LayerNorm(dim) if use_ln else nn.Identity() for _ in range(conv_blocks)])
         self.pconvs = nn.ModuleList([ConvAttnWrapper(dim, pdim, kernel_size) for _ in range(conv_blocks)])
@@ -304,12 +367,12 @@ class ESC(nn.Module):
         self, dim: int, pdim: int, kernel_size: int,
         n_blocks: int, conv_blocks: int, window_size: int, num_heads: int,
         upscaling_factor: int, exp_ratio: int = 2, attn_type: ATTN_TYPE = 'Flex',
-        use_ln: bool = False
+        use_ln: bool = False, flashbias_rank: Optional[int] = None
     ):
         super().__init__()
         if attn_type == 'Naive':
             attn_func = attention
-        elif attn_type == 'SDPA':
+        elif attn_type == 'SDPA' or attn_type == 'FlashBias':
             attn_func = F.scaled_dot_product_attention
         elif attn_type == 'Flex':
             attn_func = torch.compile(flex_attention, dynamic=True)
@@ -327,7 +390,7 @@ class ESC(nn.Module):
             Block(
                 dim, pdim, conv_blocks, 
                 kernel_size, window_size, num_heads, exp_ratio,
-                attn_func, attn_type, use_ln=use_ln
+                attn_func, attn_type, use_ln=use_ln, flashbias_rank=flashbias_rank
             ) for _ in range(n_blocks)
         ])
         self.last = nn.Conv2d(dim, dim, 3, 1, 1)
@@ -341,6 +404,7 @@ class ESC(nn.Module):
 
     @torch.no_grad()
     def load_state_dict(self, state_dict, strict = True, assign = False):
+        # For SubPixel Interpolation
         to_img_k = state_dict.get('to_img.weight')
         to_img_b = state_dict.get('to_img.bias')
         sd_scale = int((to_img_k.shape[0] // 3)**0.5)
@@ -371,6 +435,36 @@ class ESC(nn.Module):
             to_img_b = interpolate_bias(to_img_b, sd_scale, self.upscaling_factor)
             state_dict['to_img.weight'] = to_img_k
             state_dict['to_img.bias'] = to_img_b
+        
+        # For RelPos Decomposition
+        if self.blocks[0].attn.attn_type == 'FlashBias' and 'blocks.0.attn.relative_position_bias' in state_dict:
+            # Decompose RPE table into FlashBias factors when loading weights
+            from basicsr.utils import get_root_logger
+            logger = get_root_logger()
+            logger.info('Decomposing RPE table into FlashBias factors when loading weights...')
+            capture_str = 'attn.relative_position_bias'
+            for block_idx in range(len(self.blocks)):
+                rpe_key = f'blocks.{block_idx}.{capture_str}'
+                rpe_table = state_dict[rpe_key]
+                num_heads, table_size = rpe_table.shape
+                window_size = int(((table_size)**0.5 + 1) // 2)
+                
+                # recreate idxs
+                rpe_idxs = WindowAttention.create_table_idxs(window_size, num_heads)
+                N = window_size * window_size
+                bias_vec = rpe_table[rpe_idxs[:, 0], rpe_idxs[:, 1]] 
+                bias = bias_vec.view(num_heads, N, N).to(torch.float32)  
+
+                U, S, Vh = torch.linalg.svd(bias, full_matrices=False) 
+                r = self.blocks[block_idx].attn.flashbias_rank
+                sr = torch.sqrt(S[:, :r]).unsqueeze(1) 
+                q_bias = U[:, :, :r] * sr 
+                k_bias = Vh[:, :r, :].transpose(-2, -1) * sr 
+
+                state_dict[f'blocks.{block_idx}.attn.flashbias_q'] = q_bias.to(rpe_table.dtype)
+                state_dict[f'blocks.{block_idx}.attn.flashbias_k'] = k_bias.to(rpe_table.dtype)
+                
+                del state_dict[rpe_key]
 
         return super().load_state_dict(state_dict, strict, assign)
     
@@ -411,7 +505,7 @@ if __name__== '__main__':
         'num_heads': 4,
         'upscaling_factor': upsampling_factor,
         'exp_ratio': 1.25,
-        'attn_type': 'Flex',  # Naive, SDPA, Flex / For FLOPs calculation, use Naive
+        'attn_type': 'Flex',  # Naive, SDPA, Flex, and FlashBias / For FLOPs calculation, use Naive
     }
     # Light
     # model_kwargs = {

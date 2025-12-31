@@ -1,0 +1,67 @@
+name: ESC_Real_FB_R48_X4
+model_type: ESRModel
+scale: 4
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+datasets:
+  # test_1:  # the 1st test dataset
+  #   name: DRealSR
+  #   type: SingleImageDataset
+  #   dataroot_lq: /home2/leedh97/datasets/DRealSR/Test_x4/test_LR
+  #   io_backend:
+  #     type: disk
+
+  # test_2:  # the 1st test dataset
+  #   name: RealSR
+  #   type: SingleImageDataset
+  #   dataroot_lq: /home2/leedh97/datasets/RealSRV3/LR
+  #   io_backend:
+  #     type: disk
+
+  # test_3:  # the 1st test dataset
+  #   name: RealSRSet+5images
+  #   type: SingleImageDataset
+  #   dataroot_lq: /home2/leedh97/TFP/RealSRSet+5images
+  #   io_backend:
+  #     type: disk
+
+  # test_4:  # the 1st test dataset
+  #   name: RealLQ250
+  #   type: SingleImageDataset
+  #   dataroot_lq: /home2/leedh97/TFP/RealLQ250
+  #   io_backend:
+  #     type: disk
+  test_1:
+    name: Test
+    type: SingleImageDataset
+    dataroot_lq: /home/leedh97/datasets/Manga109/LR_bicubic/X4
+    filename_tmpl: '{}x4'
+    io_backend:
+      type: disk
+
+# network structures
+network_g:
+  type: ESCReal
+  dim: 64
+  pdim: 16
+  kernel_size: 13
+  n_blocks: 10
+  conv_blocks: 5
+  window_size: 32
+  num_heads: 4
+  upscaling_factor: 4
+  exp_ratio: 2
+  attn_type: FlashBias   # Naive, SDPA, Flex
+  flashbias_rank: 48
+
+# path
+path:
+  pretrain_network_g: /home/leedh97/ESC/pretrained_models/ESC_Real_FB_R48_GAN_X4.pth
+  param_key_g: 'params_ema'
+  strict_load_g: true
+
+# validation settings
+val:
+  save_img: true
+  suffix: ~  # add suffix to saved images, if None, use exp name
