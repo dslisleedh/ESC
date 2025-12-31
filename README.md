@@ -8,10 +8,28 @@ This repository is an official implementation of the paper "Emulating Self-atten
 
 by Dongheon Lee, Seokju Yun, and Youngmin Ro
 
-[[Paper]](https://openaccess.thecvf.com/content/ICCV2025/papers/Lee_Emulating_Self-attention_with_Convolution_for_Efficient_Image_Super-Resolution_ICCV_2025_paper.pdf) [[Pre-trained Models]](https://github.com/dslisleedh/ESC/releases/tag/1.0.0)
+[[Paper]](https://openaccess.thecvf.com/content/ICCV2025/papers/Lee_Emulating_Self-attention_with_Convolution_for_Efficient_Image_Super-Resolution_ICCV_2025_paper.pdf) [[Supp]](https://openaccess.thecvf.com/content/ICCV2025/supplemental/Lee_Emulating_Self-attention_with_ICCV_2025_supplemental.pdf) [[Pre-trained Models]](https://github.com/dslisleedh/ESC/releases/tag/1.0.0)
+
+## Update
+ - [2025-12-31] Now ESC supports FlashAttention with `torch.scaled_dot_product_attention` using FlashBias [[NeurIPS 2025]](https://arxiv.org/abs/2505.12044). We provide FlashBias implementation for esc and esc_real architectures and release pre-trained weights. **Do not use FlashBias version for academic evaluation.**
+
+### ClassicSRx2 trained on DIV2K
+
+| Method | Set5 | Set14 | B100 | Urban100 | Manga109 |
+|---|---:|---:|---:|---:|---:|
+| **ESC (Flex Attention)** | 38.35 / 0.9619 | 34.11 / 0.9223 | 32.41 / 0.9027 | 33.46 / 0.9395 | 39.54 / 0.9790 |
+| **ESC (FlashBias)** | 38.35 / 0.9619 | 34.06 / 0.9221 | 32.41 / 0.9027 | 33.43 / 0.9392 | 39.53 / 0.9790 |
+
+### RealSRx4 trained on DF2KOST @RTX4090
+
+| Method | NIQE (↓) | MANIQA (↑) | MUSIQ (↑) | CLIPIQA (↑) | Latency | Memory Usage |
+|---|---:|---:|---:|---:|---:|---:|
+| **ESC-Real (Flex Attention)** | 4.0556 | 0.3553 | 62.98 | 0.5796 | 59.9 ms | 715.9 mb |
+| **ESC-Real (FlashBias)** | 3.9649 | 0.3503 | 62.56 | 0.5659 | 51.1 ms | 730.2 mb |
+
 
 ## Real-world SR Visual Results
-[<img src="figs/imgsli1.png" height="250"/>](https://imgsli.com/MzY1MTE3) [<img src="figs/imgsli2.png" height="250"/>](https://imgsli.com/MzY1MTI1) [<img src="figs/imgsli3.png" height="250"/>](https://imgsli.com/MzY1MTI4)  
+[<img src="figs/imgsli1.png" height="250"/>](https://imgsli.com/MzY1MTE3) [<img src="figs/imgsli7.png" height="250"/>](https://imgsli.com/NDM3NTU0) [<img src="figs/imgsli3.png" height="250"/>](https://imgsli.com/MzY1MTI4)  
 
 [<img src="figs/imgsli4.png" height="250"/>](https://imgsli.com/MzY1MTMx) [<img src="figs/imgsli5.png" height="250"/>](https://imgsli.com/MzY1MTM3) [<img src="figs/imgsli6.png" height="250"/>](https://imgsli.com/MzY1MTQy)
 
@@ -20,8 +38,8 @@ by Dongheon Lee, Seokju Yun, and Youngmin Ro
 ```bash
 git clone https://github.com/dslisleedh/ESC.git
 cd ESC
-conda create -n esc python=3.10
-conda activate esc
+conda create -n esc2 python=3.10
+conda activate esc2
 pip3 install torch torchvision torchaudio  # pytorch 2.6.0 and cuda 12.4
 pip install -r requirements.txt 
 python setup.py develop
@@ -72,3 +90,15 @@ We leverage the DFLIP datasets to demonstrate our method's data scalability.
 ## Acknowledgement
 This work is based on [BasicSR](https://github.com/XPixelGroup/BasicSR) and [HAT](https://github.com/XPixelGroup/HAT). We thank them for their great work and for sharing the code.
 
+## Citation
+If you find this code useful for your research, please consider citing the following paper:
+```
+@InProceedings{Lee_2025_ICCV,
+    author    = {Lee, Dongheon and Yun, Seokju and Ro, Youngmin},
+    title     = {Emulating Self-attention with Convolution for Efficient Image Super-Resolution},
+    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+    month     = {October},
+    year      = {2025},
+    pages     = {24467-24477}
+}
+```
