@@ -11,6 +11,9 @@ by Dongheon Lee, Seokju Yun, and Youngmin Ro
 [[Paper]](https://openaccess.thecvf.com/content/ICCV2025/papers/Lee_Emulating_Self-attention_with_Convolution_for_Efficient_Image_Super-Resolution_ICCV_2025_paper.pdf) [[Supp]](https://openaccess.thecvf.com/content/ICCV2025/supplemental/Lee_Emulating_Self-attention_with_ICCV_2025_supplemental.pdf) [[Pre-trained Models]](https://github.com/dslisleedh/ESC/releases/tag/1.0.0) [[DFLIP dataset]](https://huggingface.co/datasets/dslisleedh/DFLIP)
 
 ## Update
+ - [2026-05-15] We release ESC-RIB, which enlarges the window size to 64x64 with naive **FlashAttention** and Rank-factorized Implicit Neural Bias (RIB). If you interested in the details, please check out our new work "Rank-factorized Implicit Neural Bias: Scaling Super-Resolution Transformer with FlashAttention". [[Github]](https://github.com/dslisleedh/SST) 
+ ![ESCRIB](figs/escrib.png)
+
  - [2025-12-31] Now ESC supports FlashAttention with `F.scaled_dot_product_attention` using FlashBias [[NeurIPS 2025]](https://arxiv.org/abs/2505.12044). We provide FlashBias implementation for esc and esc_real architectures and release pre-trained weights. **Do not use FlashBias version for academic evaluation.**
 
 ### ClassicSRx2 trained on DIV2K
